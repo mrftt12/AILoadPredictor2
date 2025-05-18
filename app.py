@@ -373,66 +373,124 @@ def train_models(data, target_col, timestamp_col, models, config):
 
 def generate_forecasts(data, model_info, horizon):
     """Generate forecasts using the trained model"""
-    # Extract model and metadata
-    model = model_info["model"]
-    scaler = model_info["scaler"]
-    feature_cols = model_info["feature_cols"]
-    
-    # Get the last date in the dataset
-    last_date = data.iloc[-1]["timestamp"] if "timestamp" in data.columns else pd.to_datetime(data.index[-1])
-    if not isinstance(last_date, pd.Timestamp):
-        last_date = pd.to_datetime(last_date)
-    
-    # Generate future dates
-    future_dates = [last_date + timedelta(days=i) for i in range(1, horizon+1)]
-    
-    # Create future features
-    future_features = []
-    for date in future_dates:
-        # Create a feature vector similar to the training data
-        features = {
-            'hour': date.hour,
-            'day': date.day,
-            'day_of_week': date.dayofweek,
-            'month': date.month,
-            'year': date.year,
-            'is_weekend': 1 if date.dayofweek >= 5 else 0
-        }
+    try:
+        # Extract model and metadata
+        model = model_info["model"]
+        scaler = model_info["scaler"]
+        feature_cols = model_info["feature_cols"]
         
-        # Add cyclical features if they were in the training data
-        if 'hour_sin' in feature_cols:
-            features['hour_sin'] = np.sin(2 * np.pi * date.hour / 24)
-            features['hour_cos'] = np.cos(2 * np.pi * date.hour / 24)
+        # Determine the frequency of data (daily, hourly, etc.)
+        if "timestamp" in data.columns:
+            timestamp_col = "timestamp"
+        else:
+            # Try to find a timestamp column
+            timestamp_candidates = [col for col in data.columns 
+                                   if any(time_str in col.lower() for time_str in ['time', 'date'])]
+            timestamp_col = timestamp_candidates[0] if timestamp_candidates else None
+            
+        if timestamp_col:
+            # Convert to datetime if it's not already
+            if not pd.api.types.is_datetime64_any_dtype(data[timestamp_col]):
+                data[timestamp_col] = pd.to_datetime(data[timestamp_col])
+                
+            # Determine frequency from timestamps
+            timestamps = data[timestamp_col].sort_values()
+            time_diff = (timestamps.iloc[-1] - timestamps.iloc[0]).total_seconds() / (len(timestamps) - 1) / 3600
+            
+            if time_diff < 1.5:  # Less than 1.5 hours
+                freq = pd.Timedelta(hours=1)
+            elif time_diff < 36:  # Less than 36 hours
+                freq = pd.Timedelta(days=1)
+            else:
+                freq = pd.Timedelta(days=7)  # Weekly or longer
+                
+            # Get the last date
+            last_date = data[timestamp_col].iloc[-1]
+            
+            # Generate future dates
+            future_dates = [last_date + (i * freq) for i in range(1, horizon+1)]
+        else:
+            # If no timestamp column, use index
+            last_date = pd.to_datetime(data.index[-1]) if isinstance(data.index, pd.DatetimeIndex) else pd.Timestamp.now()
+            future_dates = [last_date + timedelta(days=i) for i in range(1, horizon+1)]
         
-        if 'day_of_week_sin' in feature_cols:
-            features['day_of_week_sin'] = np.sin(2 * np.pi * date.dayofweek / 7)
-            features['day_of_week_cos'] = np.cos(2 * np.pi * date.dayofweek / 7)
+        # Create future features
+        future_features = []
+        for date in future_dates:
+            # Create a feature vector similar to the training data
+            features = {}
+            
+            # Add time-based features
+            if 'hour' in feature_cols:
+                features['hour'] = date.hour
+            if 'day' in feature_cols:
+                features['day'] = date.day
+            if 'dayofweek' in feature_cols:
+                features['dayofweek'] = date.dayofweek
+            if 'day_of_week' in feature_cols:
+                features['day_of_week'] = date.dayofweek
+            if 'month' in feature_cols:
+                features['month'] = date.month
+            if 'year' in feature_cols:
+                features['year'] = date.year
+            if 'is_weekend' in feature_cols:
+                features['is_weekend'] = 1 if date.dayofweek >= 5 else 0
+            if 'dayofyear' in feature_cols:
+                features['dayofyear'] = date.dayofyear
+            
+            # Add cyclical features if they were in the training data
+            if 'hour_sin' in feature_cols:
+                features['hour_sin'] = np.sin(2 * np.pi * date.hour / 24)
+                features['hour_cos'] = np.cos(2 * np.pi * date.hour / 24)
+            
+            if 'day_of_week_sin' in feature_cols or 'dayofweek_sin' in feature_cols:
+                features['day_of_week_sin'] = np.sin(2 * np.pi * date.dayofweek / 7)
+                features['day_of_week_cos'] = np.cos(2 * np.pi * date.dayofweek / 7)
+                features['dayofweek_sin'] = np.sin(2 * np.pi * date.dayofweek / 7)
+                features['dayofweek_cos'] = np.cos(2 * np.pi * date.dayofweek / 7)
+            
+            if 'month_sin' in feature_cols:
+                features['month_sin'] = np.sin(2 * np.pi * date.month / 12)
+                features['month_cos'] = np.cos(2 * np.pi * date.month / 12)
+            
+            # Extract only the features that were used in training
+            feature_vector = []
+            for col in feature_cols:
+                if col in features:
+                    feature_vector.append(features[col])
+                else:
+                    # Default value for missing features
+                    feature_vector.append(0)
+            
+            future_features.append(feature_vector)
         
-        if 'month_sin' in feature_cols:
-            features['month_sin'] = np.sin(2 * np.pi * date.month / 12)
-            features['month_cos'] = np.cos(2 * np.pi * date.month / 12)
+        # Scale features
+        X_future = scaler.transform(future_features)
         
-        # Extract only the features that were used in training
-        feature_vector = [features.get(col, 0) for col in feature_cols]
-        future_features.append(feature_vector)
-    
-    # Scale features
-    X_future = scaler.transform(future_features)
-    
-    # Generate predictions
-    forecasts = model.predict(X_future)
-    
-    # Create uncertainty bounds (simple approach)
-    lower_bound = forecasts * 0.9  # 10% below prediction
-    upper_bound = forecasts * 1.1  # 10% above prediction
-    
-    # Create forecast dataframe
-    forecast_df = pd.DataFrame({
-        'date': future_dates,
-        'forecast': forecasts,
-        'lower_bound': lower_bound,
-        'upper_bound': upper_bound
-    })
+        # Generate predictions
+        forecasts = model.predict(X_future)
+        
+        # Create uncertainty bounds (simple approach)
+        if isinstance(forecasts, np.ndarray):
+            lower_bound = forecasts * 0.9  # 10% below prediction
+            upper_bound = forecasts * 1.1  # 10% above prediction
+        else:
+            # Handle non-ndarray results (like pandas Series)
+            lower_bound = np.array(forecasts) * 0.9
+            upper_bound = np.array(forecasts) * 1.1
+        
+        # Create forecast dataframe
+        forecast_df = pd.DataFrame({
+            'date': future_dates,
+            'forecast': forecasts,
+            'lower_bound': lower_bound,
+            'upper_bound': upper_bound
+        })
+        
+    except Exception as e:
+        st.error(f"Error in forecast generation: {str(e)}")
+        # Return empty dataframe with expected columns
+        forecast_df = pd.DataFrame(columns=['date', 'forecast', 'lower_bound', 'upper_bound'])
     
     # Create forecast plot
     historical_data = data.copy()
