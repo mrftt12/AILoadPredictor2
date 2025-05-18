@@ -588,12 +588,11 @@ if page == "Data Ingestion":
         if st.button("Process Data"):
             with st.spinner("Processing data..."):
                 try:
-                    processed_data = st.session_state.coordinating_agent.process_data(
+                    processed_data = process_data(
                         data=st.session_state.data,
                         timestamp_col=timestamp_col,
                         target_col=target_col,
-                        freq=freq,
-                        feature_cols=feature_cols
+                        freq=freq
                     )
                     
                     st.session_state.processed_data = processed_data
