@@ -733,8 +733,8 @@ elif page == "Model Training":
         # Model selection
         models_to_train = st.multiselect(
             "Select models to train",
-            ["RandomForest", "LightGBM", "Prophet", "ARIMA", "SARIMA"],
-            default=["RandomForest", "LightGBM", "Prophet"]
+            ["RandomForest", "LinearRegression"],
+            default=["RandomForest", "LinearRegression"]
         )
         
         # Split configuration
@@ -905,7 +905,7 @@ elif page == "Forecasting":
                     # Generate forecasts
                     forecasts = generate_forecasts(
                         data=st.session_state.processed_data,
-                        model_info=st.session_state.trained_models[st.session_state.best_model],
+                        model_info=st.session_state.trained_models["models"][st.session_state.best_model],
                         horizon=forecast_horizon
                     )
                     
