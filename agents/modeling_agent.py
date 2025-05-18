@@ -3,7 +3,6 @@ import numpy as np
 from typing import Dict, List, Any, Optional, Tuple
 import mlflow
 import mlflow.sklearn
-import mlflow.tensorflow
 import mlflow.lightgbm
 import warnings
 import os
@@ -14,10 +13,6 @@ from sklearn.metrics import mean_absolute_percentage_error, r2_score, mean_squar
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import LinearRegression
 import lightgbm as lgb
-import tensorflow as tf
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense, Dropout
-from tensorflow.keras.callbacks import EarlyStopping
 import statsmodels.api as sm
 from prophet import Prophet
 
@@ -36,11 +31,11 @@ class ModelingAgent:
         
         # Define default hyperparameter grids
         self.hyperparameter_grids = {
-            "LSTM": {
-                "units": [32, 64, 128],
-                "dropout": [0.1, 0.2, 0.3],
-                "batch_size": [16, 32, 64],
-                "epochs": [50, 100]
+            "RandomForest": {
+                "n_estimators": [100, 200, 300],
+                "max_depth": [None, 10, 20],
+                "min_samples_split": [2, 5, 10],
+                "min_samples_leaf": [1, 2, 4]
             },
             "LightGBM": {
                 "learning_rate": [0.01, 0.05, 0.1],
@@ -116,10 +111,10 @@ class ModelingAgent:
                 })
                 
                 # Train the specific model
-                if model_name == "LSTM":
-                    model, metrics = self._train_lstm(
+                if model_name == "RandomForest":
+                    model, metrics = self._train_random_forest(
                         X_train, y_train, X_test, y_test, 
-                        config, scaler
+                        config, feature_names
                     )
                 
                 elif model_name == "LightGBM":
@@ -202,9 +197,9 @@ class ModelingAgent:
         
         return X_train, X_test, y_train, y_test, feature_cols, scaler
     
-    def _train_lstm(self, X_train, y_train, X_test, y_test, config, scaler):
+    def _train_random_forest(self, X_train, y_train, X_test, y_test, config, feature_names):
         """
-        Train an LSTM model.
+        Train a Random Forest model.
         
         Args:
             X_train: Training features
@@ -212,88 +207,110 @@ class ModelingAgent:
             X_test: Test features
             y_test: Test target
             config: Training configuration
-            scaler: Feature scaler
+            feature_names: Names of features
             
         Returns:
             Tuple of (trained model, metrics dictionary)
         """
-        # Reshape input data for LSTM [samples, timesteps, features]
-        timesteps = 24  # Default lookahead window
-        X_train_lstm, y_train_lstm = self._create_sequences(X_train, y_train, timesteps)
-        X_test_lstm, y_test_lstm = self._create_sequences(X_test, y_test, timesteps)
-        
-        # Get number of features
-        n_features = X_train_lstm.shape[2]
-        
         # Define hyperparameters for tuning
-        if config["tuning_method"] == "random_search":
-            # Pick random hyperparameters
-            import random
-            hp_grid = self.hyperparameter_grids["LSTM"]
+        if config["tuning_method"] == "grid_search":
+            # Grid search for hyperparameters
+            param_grid = self.hyperparameter_grids["RandomForest"]
             
-            units = random.choice(hp_grid["units"])
-            dropout = random.choice(hp_grid["dropout"])
-            batch_size = random.choice(hp_grid["batch_size"])
-            epochs = random.choice(hp_grid["epochs"])
+            # Create grid search object
+            grid_search = GridSearchCV(
+                estimator=RandomForestRegressor(random_state=config["random_state"]),
+                param_grid=param_grid,
+                cv=config["cv_folds"],
+                scoring='neg_mean_squared_error',
+                n_jobs=config["n_jobs"]
+            )
+            
+            # Fit grid search
+            grid_search.fit(X_train, y_train)
+            
+            # Get best parameters
+            best_params = grid_search.best_params_
+            
+            # Create model with best parameters
+            model = RandomForestRegressor(
+                n_estimators=best_params.get("n_estimators", 100),
+                max_depth=best_params.get("max_depth", None),
+                min_samples_split=best_params.get("min_samples_split", 2),
+                min_samples_leaf=best_params.get("min_samples_leaf", 1),
+                random_state=config["random_state"]
+            )
+            
+        elif config["tuning_method"] == "random_search":
+            # Random search for hyperparameters
+            import random
+            hp_grid = self.hyperparameter_grids["RandomForest"]
+            
+            # Randomly select parameters
+            rand_params = {
+                "n_estimators": random.choice(hp_grid["n_estimators"]),
+                "max_depth": random.choice(hp_grid["max_depth"]),
+                "min_samples_split": random.choice(hp_grid["min_samples_split"]),
+                "min_samples_leaf": random.choice(hp_grid["min_samples_leaf"])
+            }
+            
+            # Create model with random parameters
+            model = RandomForestRegressor(
+                n_estimators=rand_params["n_estimators"],
+                max_depth=rand_params["max_depth"],
+                min_samples_split=rand_params["min_samples_split"],
+                min_samples_leaf=rand_params["min_samples_leaf"],
+                random_state=config["random_state"]
+            )
+            
+            # Set best_params for logging
+            best_params = rand_params
+            
         else:
             # Default hyperparameters
-            units = 64
-            dropout = 0.2
-            batch_size = 32
-            epochs = 100
+            best_params = {
+                "n_estimators": 100,
+                "max_depth": None,
+                "min_samples_split": 2,
+                "min_samples_leaf": 1
+            }
+            
+            # Create model with default parameters
+            model = RandomForestRegressor(
+                n_estimators=best_params["n_estimators"],
+                max_depth=best_params["max_depth"],
+                min_samples_split=best_params["min_samples_split"],
+                min_samples_leaf=best_params["min_samples_leaf"],
+                random_state=config["random_state"]
+            )
         
         # Log hyperparameters
-        mlflow.log_params({
-            "units": units,
-            "dropout": dropout,
-            "batch_size": batch_size,
-            "epochs": epochs,
-            "timesteps": timesteps
-        })
-        
-        # Build LSTM model
-        model = Sequential()
-        model.add(LSTM(units=units, input_shape=(timesteps, n_features), return_sequences=True))
-        model.add(Dropout(dropout))
-        model.add(LSTM(units=units // 2))
-        model.add(Dropout(dropout))
-        model.add(Dense(1))
-        
-        # Compile model
-        model.compile(optimizer='adam', loss='mse')
-        
-        # Define early stopping
-        early_stopping = EarlyStopping(
-            monitor='val_loss',
-            patience=10,
-            restore_best_weights=True
-        )
+        mlflow.log_params(best_params)
         
         # Train model
-        history = model.fit(
-            X_train_lstm, y_train_lstm,
-            epochs=epochs,
-            batch_size=batch_size,
-            validation_split=0.2,
-            callbacks=[early_stopping],
-            verbose=0
-        )
+        model.fit(X_train, y_train)
         
-        # Evaluate model
-        y_pred = model.predict(X_test_lstm, verbose=0).flatten()
+        # Make predictions
+        y_pred = model.predict(X_test)
         
         # Calculate metrics
-        metrics = self._calculate_metrics(y_test_lstm, y_pred)
+        metrics = self._calculate_metrics(y_test, y_pred)
         
         # Log the model
-        mlflow.tensorflow.log_model(model, "lstm_model")
+        mlflow.sklearn.log_model(model, "random_forest_model")
+        
+        # Log feature importance
+        feature_importance = pd.DataFrame({
+            'Feature': feature_names,
+            'Importance': model.feature_importances_
+        }).sort_values(by='Importance', ascending=False)
+        
+        # Save feature importance to a csv
+        feature_importance.to_csv("feature_importance.csv", index=False)
+        mlflow.log_artifact("feature_importance.csv")
         
         # Return model and metrics
-        return {
-            "model": model,
-            "timesteps": timesteps,
-            "history": history.history
-        }, metrics
+        return model, metrics
     
     def _train_lightgbm(self, X_train, y_train, X_test, y_test, config, feature_names):
         """

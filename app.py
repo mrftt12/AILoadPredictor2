@@ -2,7 +2,17 @@ import streamlit as st
 import os
 import pandas as pd
 import numpy as np
-from agents.coordinating_agent import CoordinatingAgent
+import requests
+import io
+from datetime import datetime, timedelta
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_absolute_percentage_error, r2_score, mean_squared_error
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
 
 # Set page configuration
 st.set_page_config(
@@ -27,10 +37,470 @@ if 'forecasts' not in st.session_state:
     st.session_state.forecasts = None
 if 'current_page' not in st.session_state:
     st.session_state.current_page = "Data Ingestion"
+    
+# Helper functions for direct implementation
+def load_data_from_url(url):
+    """Load data from a URL"""
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        return pd.read_csv(io.StringIO(response.text))
+    except Exception as e:
+        st.error(f"Error loading data from URL: {e}")
+        return None
 
-# Initialize the coordinating agent
-if 'coordinating_agent' not in st.session_state:
-    st.session_state.coordinating_agent = CoordinatingAgent()
+def process_data(data, timestamp_col, target_col, freq):
+    """Process the data for time series analysis"""
+    df = data.copy()
+    
+    # Convert timestamp to datetime
+    df[timestamp_col] = pd.to_datetime(df[timestamp_col])
+    
+    # Sort by timestamp
+    df = df.sort_values(by=timestamp_col)
+    
+    # Set timestamp as index for resampling
+    df = df.set_index(timestamp_col)
+    
+    # Resample to desired frequency
+    try:
+        df = df.resample(freq).mean()
+    except Exception as e:
+        st.warning(f"Could not resample to frequency {freq}. Using original data.")
+    
+    # Fill missing values
+    df = df.interpolate(method='linear')
+    
+    # Reset index to get timestamp back as a column
+    df = df.reset_index()
+    
+    # Generate time features
+    df['hour'] = df[timestamp_col].dt.hour
+    df['day'] = df[timestamp_col].dt.day
+    df['day_of_week'] = df[timestamp_col].dt.dayofweek
+    df['month'] = df[timestamp_col].dt.month
+    df['year'] = df[timestamp_col].dt.year
+    df['is_weekend'] = df['day_of_week'].apply(lambda x: 1 if x >= 5 else 0)
+    
+    return df
+
+def perform_eda(data, target_col, timestamp_col):
+    """Perform exploratory data analysis"""
+    # Copy data and set timestamp as index for time series analysis
+    df = data.copy()
+    df_ts = df.set_index(timestamp_col)
+    
+    # Descriptive statistics
+    stats = df[target_col].describe()
+    additional_stats = pd.Series({
+        'skew': df[target_col].skew(),
+        'kurtosis': df[target_col].kurtosis(),
+        'median': df[target_col].median()
+    })
+    stats_df = pd.DataFrame({
+        'Statistic': stats.index.tolist() + additional_stats.index.tolist(),
+        'Value': stats.values.tolist() + additional_stats.values.tolist()
+    })
+    
+    # Time series plot
+    time_series_plot = px.line(
+        df, 
+        x=timestamp_col, 
+        y=target_col,
+        title=f'Time Series Plot of {target_col}'
+    )
+    time_series_plot.update_layout(height=500)
+    
+    # Create autocorrelation plot
+    from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
+    import matplotlib.pyplot as plt
+    
+    # Calculate ACF and PACF values
+    from statsmodels.tsa.stattools import acf, pacf
+    try:
+        acf_values = acf(df_ts[target_col].dropna(), nlags=40)
+        pacf_values = pacf(df_ts[target_col].dropna(), nlags=40)
+        
+        # Create figure
+        autocorr_fig = make_subplots(
+            rows=2, 
+            cols=1,
+            subplot_titles=['Autocorrelation (ACF)', 'Partial Autocorrelation (PACF)']
+        )
+        
+        # Add ACF trace
+        autocorr_fig.add_trace(
+            go.Bar(x=list(range(len(acf_values))), y=acf_values, name='ACF'),
+            row=1, col=1
+        )
+        
+        # Add PACF trace
+        autocorr_fig.add_trace(
+            go.Bar(x=list(range(len(pacf_values))), y=pacf_values, name='PACF'),
+            row=2, col=1
+        )
+        
+        autocorr_fig.update_layout(height=600, showlegend=False)
+    except:
+        # Fallback if ACF calculation fails
+        autocorr_fig = go.Figure()
+        autocorr_fig.add_annotation(
+            text="Could not calculate autocorrelation",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5, showarrow=False
+        )
+    
+    # Generate seasonality plot
+    try:
+        from statsmodels.tsa.seasonal import seasonal_decompose
+        decomposition = seasonal_decompose(
+            df_ts[target_col],
+            model='additive',
+            period=12  # Default period
+        )
+        
+        seasonality_fig = make_subplots(
+            rows=4, cols=1,
+            subplot_titles=['Observed', 'Trend', 'Seasonal', 'Residual']
+        )
+        
+        # Add traces
+        seasonality_fig.add_trace(
+            go.Scatter(x=df_ts.index, y=decomposition.observed, mode='lines'),
+            row=1, col=1
+        )
+        
+        seasonality_fig.add_trace(
+            go.Scatter(x=df_ts.index, y=decomposition.trend, mode='lines'),
+            row=2, col=1
+        )
+        
+        seasonality_fig.add_trace(
+            go.Scatter(x=df_ts.index, y=decomposition.seasonal, mode='lines'),
+            row=3, col=1
+        )
+        
+        seasonality_fig.add_trace(
+            go.Scatter(x=df_ts.index, y=decomposition.resid, mode='lines'),
+            row=4, col=1
+        )
+        
+        seasonality_fig.update_layout(height=800, showlegend=False)
+    except:
+        # Fallback if decomposition fails
+        seasonality_fig = go.Figure()
+        seasonality_fig.add_annotation(
+            text="Could not perform seasonal decomposition",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5, showarrow=False
+        )
+    
+    # Generate insights
+    insights = []
+    
+    # Basic stats
+    insights.append(f"Average {target_col}: {df[target_col].mean():.2f}")
+    insights.append(f"Range: {df[target_col].min():.2f} to {df[target_col].max():.2f}")
+    
+    # Time patterns if available
+    if 'hour' in df.columns:
+        hourly_avg = df.groupby('hour')[target_col].mean()
+        peak_hour = hourly_avg.idxmax()
+        insights.append(f"Peak hour: {peak_hour}:00")
+    
+    if 'day_of_week' in df.columns:
+        daily_avg = df.groupby('day_of_week')[target_col].mean()
+        days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+        peak_day = days[daily_avg.idxmax()]
+        insights.append(f"Peak day: {peak_day}")
+    
+    if 'is_weekend' in df.columns:
+        weekend_avg = df[df['is_weekend'] == 1][target_col].mean()
+        weekday_avg = df[df['is_weekend'] == 0][target_col].mean()
+        diff_pct = ((weekend_avg - weekday_avg) / weekday_avg) * 100
+        insights.append(f"Weekend vs Weekday difference: {diff_pct:.1f}%")
+    
+    # Return results
+    return {
+        "descriptive_stats": stats_df,
+        "time_series_plot": time_series_plot,
+        "autocorrelation_plot": autocorr_fig,
+        "seasonality_plot": seasonality_fig,
+        "insights": "\n".join(insights)
+    }
+
+def train_models(data, target_col, timestamp_col, models, config):
+    """Train models on the data"""
+    df = data.copy()
+    
+    # Extract features (excluding timestamp and target)
+    feature_cols = [col for col in df.columns if col not in [timestamp_col, target_col]]
+    X = df[feature_cols].values
+    y = df[target_col].values
+    
+    # Scale features
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    
+    # Split data
+    train_size = int(len(X_scaled) * config["train_size"])
+    X_train, X_test = X_scaled[:train_size], X_scaled[train_size:]
+    y_train, y_test = y[:train_size], y[train_size:]
+    
+    # Dictionary to store trained models and metrics
+    trained_models = {}
+    all_metrics = {}
+    model_plots = {}
+    
+    # Train each model
+    for model_name in models:
+        if model_name == "RandomForest":
+            # Train Random Forest model
+            model = RandomForestRegressor(
+                n_estimators=100,
+                random_state=42
+            )
+            model.fit(X_train, y_train)
+            
+            # Make predictions
+            y_pred = model.predict(X_test)
+            
+            # Store model
+            trained_models[model_name] = {
+                "model": model,
+                "scaler": scaler,
+                "feature_cols": feature_cols
+            }
+            
+        elif model_name == "LinearRegression":
+            # Train Linear Regression model
+            model = LinearRegression()
+            model.fit(X_train, y_train)
+            
+            # Make predictions
+            y_pred = model.predict(X_test)
+            
+            # Store model
+            trained_models[model_name] = {
+                "model": model,
+                "scaler": scaler,
+                "feature_cols": feature_cols
+            }
+            
+        else:
+            # Skip unsupported models
+            continue
+        
+        # Calculate metrics
+        mape = mean_absolute_percentage_error(y_test, y_pred) * 100
+        rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+        r2 = r2_score(y_test, y_pred)
+        
+        all_metrics[model_name] = {
+            "mape": mape,
+            "rmse": rmse,
+            "r2": r2
+        }
+        
+        # Create evaluation plots
+        timestamps = df[timestamp_col].values[train_size:train_size+len(y_pred)]
+        
+        # Actual vs predicted plot
+        actual_vs_pred = go.Figure()
+        actual_vs_pred.add_trace(go.Scatter(
+            x=timestamps, y=y_test, mode='lines', name='Actual', line=dict(color='blue')
+        ))
+        actual_vs_pred.add_trace(go.Scatter(
+            x=timestamps, y=y_pred, mode='lines', name='Predicted', line=dict(color='red')
+        ))
+        actual_vs_pred.update_layout(
+            title=f'{model_name} - Actual vs Predicted',
+            xaxis_title='Time',
+            yaxis_title='Value',
+            height=500
+        )
+        
+        # Residuals plot
+        residuals = y_test - y_pred
+        residuals_plot = go.Figure()
+        residuals_plot.add_trace(go.Scatter(
+            x=timestamps, y=residuals, mode='lines', name='Residuals', line=dict(color='green')
+        ))
+        residuals_plot.update_layout(
+            title=f'{model_name} - Residuals',
+            xaxis_title='Time',
+            yaxis_title='Residual',
+            height=400
+        )
+        
+        # Store plots
+        model_plots[model_name] = {
+            "actual_vs_predicted": actual_vs_pred,
+            "residuals": residuals_plot
+        }
+    
+    # Create comparison plot
+    comparison_data = []
+    for model_name, metrics in all_metrics.items():
+        for metric_name, value in metrics.items():
+            comparison_data.append({
+                'Model': model_name,
+                'Metric': metric_name,
+                'Value': value
+            })
+    
+    df_comparison = pd.DataFrame(comparison_data)
+    comparison_plot = px.bar(
+        df_comparison,
+        x='Model',
+        y='Value',
+        color='Metric',
+        barmode='group',
+        title='Model Performance Comparison'
+    )
+    
+    # Determine best model based on MAPE (lower is better)
+    best_model = min(all_metrics.items(), key=lambda x: x[1]["mape"])[0]
+    
+    # Return results
+    return {
+        "models": trained_models,
+        "metrics": all_metrics,
+        "model_plots": model_plots,
+        "comparison_plot": comparison_plot,
+        "best_model": best_model
+    }
+
+def generate_forecasts(data, model_info, horizon):
+    """Generate forecasts using the trained model"""
+    # Extract model and metadata
+    model = model_info["model"]
+    scaler = model_info["scaler"]
+    feature_cols = model_info["feature_cols"]
+    
+    # Get the last date in the dataset
+    last_date = data.iloc[-1]["timestamp"] if "timestamp" in data.columns else pd.to_datetime(data.index[-1])
+    if not isinstance(last_date, pd.Timestamp):
+        last_date = pd.to_datetime(last_date)
+    
+    # Generate future dates
+    future_dates = [last_date + timedelta(days=i) for i in range(1, horizon+1)]
+    
+    # Create future features
+    future_features = []
+    for date in future_dates:
+        # Create a feature vector similar to the training data
+        features = {
+            'hour': date.hour,
+            'day': date.day,
+            'day_of_week': date.dayofweek,
+            'month': date.month,
+            'year': date.year,
+            'is_weekend': 1 if date.dayofweek >= 5 else 0
+        }
+        
+        # Add cyclical features if they were in the training data
+        if 'hour_sin' in feature_cols:
+            features['hour_sin'] = np.sin(2 * np.pi * date.hour / 24)
+            features['hour_cos'] = np.cos(2 * np.pi * date.hour / 24)
+        
+        if 'day_of_week_sin' in feature_cols:
+            features['day_of_week_sin'] = np.sin(2 * np.pi * date.dayofweek / 7)
+            features['day_of_week_cos'] = np.cos(2 * np.pi * date.dayofweek / 7)
+        
+        if 'month_sin' in feature_cols:
+            features['month_sin'] = np.sin(2 * np.pi * date.month / 12)
+            features['month_cos'] = np.cos(2 * np.pi * date.month / 12)
+        
+        # Extract only the features that were used in training
+        feature_vector = [features.get(col, 0) for col in feature_cols]
+        future_features.append(feature_vector)
+    
+    # Scale features
+    X_future = scaler.transform(future_features)
+    
+    # Generate predictions
+    forecasts = model.predict(X_future)
+    
+    # Create uncertainty bounds (simple approach)
+    lower_bound = forecasts * 0.9  # 10% below prediction
+    upper_bound = forecasts * 1.1  # 10% above prediction
+    
+    # Create forecast dataframe
+    forecast_df = pd.DataFrame({
+        'date': future_dates,
+        'forecast': forecasts,
+        'lower_bound': lower_bound,
+        'upper_bound': upper_bound
+    })
+    
+    # Create forecast plot
+    historical_data = data.copy()
+    if "timestamp" in historical_data.columns:
+        timestamp_col = "timestamp"
+    else:
+        # Try to find a timestamp column
+        timestamp_candidates = [col for col in historical_data.columns 
+                              if any(time_str in col.lower() for time_str in ['time', 'date'])]
+        timestamp_col = timestamp_candidates[0] if timestamp_candidates else historical_data.index.name
+    
+    target_col = [col for col in historical_data.columns if col not in feature_cols and col != timestamp_col][0]
+    
+    # Create plot
+    fig = go.Figure()
+    
+    # Add historical data
+    if len(historical_data) > 0:
+        fig.add_trace(go.Scatter(
+            x=historical_data[timestamp_col],
+            y=historical_data[target_col],
+            mode='lines',
+            name='Historical',
+            line=dict(color='blue')
+        ))
+    
+    # Add forecast
+    fig.add_trace(go.Scatter(
+        x=forecast_df['date'],
+        y=forecast_df['forecast'],
+        mode='lines',
+        name='Forecast',
+        line=dict(color='red')
+    ))
+    
+    # Add confidence intervals
+    fig.add_trace(go.Scatter(
+        x=forecast_df['date'],
+        y=forecast_df['upper_bound'],
+        mode='lines',
+        name='Upper Bound',
+        line=dict(width=0),
+        showlegend=True
+    ))
+    
+    fig.add_trace(go.Scatter(
+        x=forecast_df['date'],
+        y=forecast_df['lower_bound'],
+        mode='lines',
+        name='Lower Bound',
+        line=dict(width=0),
+        fillcolor='rgba(255, 0, 0, 0.1)',
+        fill='tonexty',
+        showlegend=True
+    ))
+    
+    fig.update_layout(
+        title='Load Forecast',
+        xaxis_title='Date/Time',
+        yaxis_title='Load',
+        height=600
+    )
+    
+    # Return results
+    return {
+        "forecast_data": forecast_df,
+        "forecast_plot": fig
+    }
 
 # Sidebar for navigation
 st.sidebar.title("Navigation")
@@ -197,8 +667,8 @@ elif page == "Model Training":
         # Model selection
         models_to_train = st.multiselect(
             "Select models to train",
-            ["LSTM", "LightGBM", "Prophet", "ARIMA", "SARIMA"],
-            default=["LSTM", "LightGBM", "Prophet"]
+            ["RandomForest", "LightGBM", "Prophet", "ARIMA", "SARIMA"],
+            default=["RandomForest", "LightGBM", "Prophet"]
         )
         
         # Split configuration
