@@ -1023,6 +1023,133 @@ elif page == "Visualization":
                 except Exception as e:
                     st.error(f"Error generating report: {e}")
 
+# Forecast History Page
+elif page == "Forecast History":
+    st.header("Forecast History")
+    st.markdown("""
+    This page shows your saved forecasts from the database. You can view past forecasting results,
+    compare performance across different models, and track your forecasting accuracy over time.
+    """)
+    
+    # Get saved forecasts from database
+    try:
+        forecasts_df = st.session_state.db_handler.get_forecast_list()
+        
+        if forecasts_df is not None and not forecasts_df.empty:
+            st.subheader("Saved Forecasts")
+            st.dataframe(forecasts_df)
+            
+            # Select a forecast to view
+            if "selected_forecast_id" not in st.session_state:
+                st.session_state.selected_forecast_id = None
+                
+            forecast_ids = forecasts_df["id"].tolist()
+            selected_id = st.selectbox(
+                "Select a forecast to view details",
+                forecast_ids,
+                format_func=lambda x: f"Forecast {x}: {forecasts_df[forecasts_df['id'] == x]['model_type'].values[0]} - {forecasts_df[forecasts_df['id'] == x]['created_at'].values[0]}"
+            )
+            
+            if st.button("View Forecast Details") or st.session_state.selected_forecast_id == selected_id:
+                st.session_state.selected_forecast_id = selected_id
+                
+                # Get forecast details
+                forecast = st.session_state.db_handler.get_forecast_by_id(selected_id)
+                
+                if forecast:
+                    # Display forecast info
+                    st.subheader(f"Forecast #{forecast['id']} Details")
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.markdown(f"**Model Type:** {forecast['model_type']}")
+                        st.markdown(f"**Forecast Date:** {forecast['forecast_date']}")
+                    
+                    with col2:
+                        st.markdown(f"**Horizon:** {forecast['horizon']} periods")
+                        st.markdown(f"**Created At:** {forecast['created_at']}")
+                    
+                    # Model metrics
+                    st.subheader("Model Performance")
+                    if forecast['model_metrics']:
+                        metrics_df = pd.DataFrame({
+                            'Metric': list(forecast['model_metrics'].keys()),
+                            'Value': list(forecast['model_metrics'].values())
+                        })
+                        st.dataframe(metrics_df)
+                    else:
+                        st.info("No model metrics available")
+                    
+                    # Forecast values
+                    st.subheader("Forecast Values")
+                    if forecast['forecast_values']:
+                        forecast_df = pd.DataFrame(forecast['forecast_values'])
+                        st.dataframe(forecast_df)
+                        
+                        # Create visualization
+                        fig = go.Figure()
+                        
+                        # Add forecast
+                        fig.add_trace(go.Scatter(
+                            x=pd.to_datetime(forecast_df['date']),
+                            y=forecast_df['forecast'],
+                            mode='lines',
+                            name='Forecast',
+                            line=dict(color='red')
+                        ))
+                        
+                        # Add confidence intervals if available
+                        if 'lower_bound' in forecast_df.columns and 'upper_bound' in forecast_df.columns:
+                            fig.add_trace(go.Scatter(
+                                x=pd.to_datetime(forecast_df['date']),
+                                y=forecast_df['upper_bound'],
+                                mode='lines',
+                                name='Upper Bound',
+                                line=dict(width=0),
+                                showlegend=True
+                            ))
+                            
+                            fig.add_trace(go.Scatter(
+                                x=pd.to_datetime(forecast_df['date']),
+                                y=forecast_df['lower_bound'],
+                                mode='lines',
+                                name='Lower Bound',
+                                line=dict(width=0),
+                                fillcolor='rgba(255, 0, 0, 0.1)',
+                                fill='tonexty',
+                                showlegend=True
+                            ))
+                        
+                        fig.update_layout(
+                            title='Saved Load Forecast',
+                            xaxis_title='Date/Time',
+                            yaxis_title='Load',
+                            height=500
+                        )
+                        
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.info("No forecast values available")
+                else:
+                    st.error("Could not retrieve forecast details")
+        else:
+            st.info("No forecasts saved yet. Generate and save forecasts to see them here.")
+            
+        # Get saved models
+        models_df = st.session_state.db_handler.get_model_list()
+        if models_df is not None and not models_df.empty:
+            with st.expander("View Saved Models"):
+                st.dataframe(models_df)
+        
+        # Get saved datasets
+        datasets_df = st.session_state.db_handler.get_dataset_list()
+        if datasets_df is not None and not datasets_df.empty:
+            with st.expander("View Saved Datasets"):
+                st.dataframe(datasets_df)
+    
+    except Exception as e:
+        st.error(f"Error accessing forecast history: {e}")
+
 # Add footer
 st.markdown("---")
 st.markdown("AI Agent-Based Load Forecasting System")
