@@ -502,10 +502,17 @@ def generate_forecasts(data, model_info, horizon):
         "forecast_plot": fig
     }
 
+# Import database utils
+from utils.db_utils import DatabaseHandler
+
+# Initialize database handler if it doesn't exist
+if 'db_handler' not in st.session_state:
+    st.session_state.db_handler = DatabaseHandler()
+
 # Sidebar for navigation
 st.sidebar.title("Navigation")
 pages = ["Data Ingestion", "Exploratory Data Analysis", "Model Training", 
-         "Model Evaluation", "Forecasting", "Visualization"]
+         "Model Evaluation", "Forecasting", "Visualization", "Forecast History"]
 
 page = st.sidebar.radio("Go to", pages, index=pages.index(st.session_state.current_page))
 st.session_state.current_page = page
@@ -904,6 +911,32 @@ elif page == "Forecasting":
                     
                     st.session_state.forecasts = forecasts
                     st.success(f"Successfully generated forecasts for {forecast_horizon} periods!")
+                    
+                    # Save forecast to database
+                    try:
+                        # Save model first
+                        model_metrics = st.session_state.trained_models["metrics"].get(st.session_state.best_model, {})
+                        model_params = {"name": st.session_state.best_model}
+                        
+                        model_id = st.session_state.db_handler.save_model(
+                            name=f"{st.session_state.best_model}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                            model_type=st.session_state.best_model,
+                            metrics=model_metrics,
+                            parameters=model_params
+                        )
+                        
+                        if model_id:
+                            # Then save forecast
+                            forecast_id = st.session_state.db_handler.save_forecast(
+                                model_id=model_id,
+                                forecast_data=forecasts["forecast_data"],
+                                horizon=forecast_horizon
+                            )
+                            
+                            if forecast_id:
+                                st.success(f"Forecast saved to database with ID: {forecast_id}")
+                    except Exception as e:
+                        st.warning(f"Could not save forecast to database: {e}")
                     
                     # Auto navigate to Visualization
                     st.session_state.current_page = "Visualization"
