@@ -540,10 +540,70 @@ if page == "Data Ingestion":
             except Exception as e:
                 st.error(f"Error loading data: {e}")
     else:
+        # Sample datasets option
+        st.subheader("Sample Datasets")
+        sample_option = st.selectbox(
+            "Load a sample dataset",
+            ["None", "Electricity Load Data (Hourly)", "Power Consumption (15min)"]
+        )
+        
+        # Handle sample dataset selection
+        if sample_option != "None" and st.button("Load Sample"):
+            if sample_option == "Electricity Load Data (Hourly)":
+                # Create sample hourly electricity load data
+                dates = pd.date_range(start='2023-01-01', end='2023-01-31', freq='H')
+                np.random.seed(42)
+                
+                # Create base load with daily and weekly patterns
+                n = len(dates)
+                base_load = 100 + 50 * np.sin(np.linspace(0, 4*np.pi, n))  # Daily pattern
+                weekly_pattern = 20 * np.sin(np.linspace(0, 4*np.pi/7, n))  # Weekly pattern
+                random_noise = np.random.normal(0, 10, n)
+                
+                load = base_load + weekly_pattern + random_noise
+                
+                # Create dataframe
+                data = pd.DataFrame({
+                    'timestamp': dates,
+                    'load': load,
+                    'temp': 20 + 5 * np.sin(np.linspace(0, 2*np.pi, n)) + np.random.normal(0, 2, n)
+                })
+                
+                st.session_state.data = data
+                st.success(f"Sample electricity load data loaded! Shape: {data.shape}")
+                st.dataframe(data.head())
+                
+            elif sample_option == "Power Consumption (15min)":
+                # Create sample 15-min power consumption data
+                dates = pd.date_range(start='2023-01-01', end='2023-01-15', freq='15min')
+                np.random.seed(43)
+                
+                n = len(dates)
+                # More complex patterns with 15-min variations
+                base_load = 500 + 200 * np.sin(np.linspace(0, 8*np.pi, n))  # Daily pattern
+                weekly_pattern = 100 * np.sin(np.linspace(0, 4*np.pi/7, n))  # Weekly pattern
+                random_noise = np.random.normal(0, 50, n)
+                
+                consumption = base_load + weekly_pattern + random_noise
+                
+                # Create dataframe
+                data = pd.DataFrame({
+                    'timestamp': dates,
+                    'power_consumption': consumption,
+                    'temperature': 22 + 8 * np.sin(np.linspace(0, 2*np.pi, n)) + np.random.normal(0, 3, n),
+                    'humidity': 60 + 15 * np.sin(np.linspace(0, 4*np.pi, n)) + np.random.normal(0, 5, n)
+                })
+                
+                st.session_state.data = data
+                st.success(f"Sample power consumption data loaded! Shape: {data.shape}")
+                st.dataframe(data.head())
+        
+        # Or enter URL
+        st.subheader("Load from URL")
         url = st.text_input("Enter URL to CSV file")
-        if url and st.button("Fetch Data"):
+        if url and st.button("Fetch Data from URL"):
             try:
-                data = st.session_state.coordinating_agent.fetch_data_from_url(url)
+                data = load_data_from_url(url)
                 st.session_state.data = data
                 st.success(f"Data loaded successfully! Shape: {data.shape}")
                 st.dataframe(data.head())
@@ -622,7 +682,7 @@ elif page == "Exploratory Data Analysis":
         if st.session_state.eda_results is None or st.button("Run EDA"):
             with st.spinner("Performing exploratory data analysis..."):
                 try:
-                    eda_results = st.session_state.coordinating_agent.perform_eda(
+                    eda_results = perform_eda(
                         data=st.session_state.processed_data,
                         target_col=st.session_state.data_config["target_col"],
                         timestamp_col=st.session_state.data_config["timestamp_col"]
@@ -713,7 +773,7 @@ elif page == "Model Training":
                         }
                         
                         # Train models
-                        trained_models = st.session_state.coordinating_agent.train_models(
+                        trained_models = train_models(
                             data=st.session_state.processed_data,
                             target_col=st.session_state.data_config["target_col"],
                             timestamp_col=st.session_state.data_config["timestamp_col"],
@@ -836,10 +896,10 @@ elif page == "Forecasting":
                     }
                     
                     # Generate forecasts
-                    forecasts = st.session_state.coordinating_agent.generate_forecasts(
+                    forecasts = generate_forecasts(
                         data=st.session_state.processed_data,
-                        model_name=st.session_state.best_model,
-                        config=forecast_config
+                        model_info=st.session_state.trained_models[st.session_state.best_model],
+                        horizon=forecast_horizon
                     )
                     
                     st.session_state.forecasts = forecasts
