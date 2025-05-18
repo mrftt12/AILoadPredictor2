@@ -960,6 +960,26 @@ elif page == "Visualization":
         st.subheader("Forecast Data")
         st.dataframe(st.session_state.forecasts["forecast_data"])
         
+        # Option to save dataset
+        with st.expander("Save Dataset Information"):
+            dataset_name = st.text_input("Dataset Name", value="Load Dataset")
+            dataset_description = st.text_area("Dataset Description", value="Time series data for load forecasting")
+            
+            if st.button("Save Dataset to Database"):
+                try:
+                    dataset_id = st.session_state.db_handler.save_dataset(
+                        name=dataset_name,
+                        description=dataset_description,
+                        data=st.session_state.processed_data
+                    )
+                    
+                    if dataset_id:
+                        st.success(f"Dataset saved with ID: {dataset_id}")
+                    else:
+                        st.error("Failed to save dataset to database")
+                except Exception as e:
+                    st.error(f"Error saving dataset: {e}")
+        
         # Allow download of forecast results
         csv = st.session_state.forecasts["forecast_data"].to_csv(index=False)
         st.download_button(
@@ -980,13 +1000,15 @@ elif page == "Visualization":
         if st.button("Generate Forecast Report"):
             with st.spinner("Generating report..."):
                 try:
-                    report = st.session_state.coordinating_agent.generate_report(
-                        processed_data=st.session_state.processed_data,
-                        eda_results=st.session_state.eda_results,
-                        model_results=st.session_state.trained_models,
-                        forecast_results=st.session_state.forecasts,
-                        selected_model=st.session_state.best_model
-                    )
+                    # Simple report generation
+                    report = f"""
+                    <h1>Load Forecasting Report</h1>
+                    <h2>Model: {st.session_state.best_model}</h2>
+                    <p>Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+                    <hr>
+                    <h3>Forecast Summary</h3>
+                    <p>Horizon: {len(st.session_state.forecasts['forecast_data'])} periods</p>
+                    """
                     
                     st.session_state.report = report
                     st.success("Report generated successfully!")
