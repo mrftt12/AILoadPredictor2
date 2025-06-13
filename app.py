@@ -1,4 +1,4 @@
-import streamlit as st
+mport streamlit as st
 import os
 import pandas as pd
 import numpy as np
@@ -18,11 +18,11 @@ from sktime.forecasting.naive import NaiveForecaster
 from sktime.forecasting.arima import ARIMA
 #from sktime.forecasting.fbprophet import Prophet
 from sktime.forecasting.bats import BATS
-#from sktime.forecasting.tbats import TBATS
+from sktime.forecasting.tbats import TBATS
 from sktime.forecasting.compose import AutoEnsembleForecaster
 from sktime.forecasting.exp_smoothing import ExponentialSmoothing
 from sktime.forecasting.ets import AutoETS
-import lightgbm as LightGBM
+import lightgbm as lgb
 
 
 # Set page configuration
@@ -299,64 +299,91 @@ def train_models(data, target_col, timestamp_col, models, config):
             }
 
         elif model_name == "Prophet":
-            # Train Linear Regression model
+            # Train Prophet model
+            # Prophet requires specific data format with 'ds' and 'y' columns
+            prophet_train = pd.DataFrame({
+                'ds': df[timestamp_col][:train_size],
+                'y': y_train
+            })
+            
             model = Prophet()
-            model.fit(X_train, y_train)
+            model.fit(prophet_train)
             
             # Make predictions
-            y_pred = model.predict(X_test)
+            prophet_test = pd.DataFrame({
+                'ds': df[timestamp_col][train_size:train_size+len(y_test)]
+            })
+            prophet_pred = model.predict(prophet_test)
+            y_pred = prophet_pred['yhat'].values
             
             # Store model
             trained_models[model_name] = {
                 "model": model,
-                "scaler": scaler,
-                "feature_cols": feature_cols
+                "scaler": None,  # Prophet doesn't use external scaling
+                "feature_cols": [timestamp_col]  # Prophet only uses timestamp
             }
         elif model_name == "TBATS":
-            # Train Linear Regression model
+            # Train TBATS model (time series specific)
             model = TBATS()
-            model.fit(X_train, y_train)
+            
+            # TBATS needs time series data, not feature matrix
+            y_train_ts = pd.Series(y_train, index=pd.date_range('2023-01-01', periods=len(y_train), freq='H'))
+            model.fit(y_train_ts)
             
             # Make predictions
-            y_pred = model.predict(X_test)
+            fh = list(range(1, len(y_test) + 1))
+            y_pred = model.predict(fh=fh)
             
             # Store model
             trained_models[model_name] = {
                 "model": model,
-                "scaler": scaler,
-                "feature_cols": feature_cols
+                "scaler": None,  # TBATS handles its own scaling
+                "feature_cols": [timestamp_col]  # TBATS only uses timestamp
             }
         elif model_name == "ExponentialSmoothing":
-            # Train 
+            # Train Exponential Smoothing model
             model = ExponentialSmoothing()
-            model.fit(X_train, y_train)
+            
+            # ExponentialSmoothing needs time series data
+            y_train_ts = pd.Series(y_train, index=pd.date_range('2023-01-01', periods=len(y_train), freq='H'))
+            model.fit(y_train_ts)
             
             # Make predictions
-            y_pred = model.predict(X_test)
+            fh = list(range(1, len(y_test) + 1))
+            y_pred = model.predict(fh=fh)
             
             # Store model
             trained_models[model_name] = {
                 "model": model,
-                "scaler": scaler,
-                "feature_cols": feature_cols
+                "scaler": None,  # ExponentialSmoothing handles its own scaling
+                "feature_cols": [timestamp_col]  # Only uses timestamp
             }
         elif model_name == "AutoETS":
-            # Train 
+            # Train AutoETS model
             model = AutoETS()
-            model.fit(X_train, y_train)
+            
+            # AutoETS needs time series data
+            y_train_ts = pd.Series(y_train, index=pd.date_range('2023-01-01', periods=len(y_train), freq='H'))
+            model.fit(y_train_ts)
             
             # Make predictions
-            y_pred = model.predict(X_test)
+            fh = list(range(1, len(y_test) + 1))
+            y_pred = model.predict(fh=fh)
             
             # Store model
             trained_models[model_name] = {
                 "model": model,
-                "scaler": scaler,
-                "feature_cols": feature_cols
+                "scaler": None,  # AutoETS handles its own scaling
+                "feature_cols": [timestamp_col]  # Only uses timestamp
             }
         elif model_name == "LightGBM":
-            # 
-            model = LightGBM()
+            # Train LightGBM model
+            import lightgbm as lgb
+            model = lgb.LGBMRegressor(
+                n_estimators=100,
+                random_state=42,
+                verbose=-1
+            )
             model.fit(X_train, y_train)
             
             # Make predictions
@@ -462,6 +489,9 @@ def generate_forecasts(data, model_info, horizon):
         scaler = model_info["scaler"]
         feature_cols = model_info["feature_cols"]
         
+        # Check if this is a time series specific model
+        is_ts_model = any(isinstance(model, cls) for cls in [Prophet, TBATS, ExponentialSmoothing, AutoETS])
+        
         # Determine the frequency of data (daily, hourly, etc.)
         if "timestamp" in data.columns:
             timestamp_col = "timestamp"
@@ -547,11 +577,23 @@ def generate_forecasts(data, model_info, horizon):
             
             future_features.append(feature_vector)
         
-        # Scale features
-        X_future = scaler.transform(future_features)
-        
-        # Generate predictions
-        forecasts = model.predict(X_future)
+        # Generate predictions based on model type
+        if is_ts_model:
+            if isinstance(model, Prophet):
+                # Prophet needs specific format
+                future_df = pd.DataFrame({'ds': future_dates})
+                prophet_forecast = model.predict(future_df)
+                forecasts = prophet_forecast['yhat'].values
+            else:
+                # Other time series models (TBATS, ExponentialSmoothing, AutoETS)
+                fh = list(range(1, horizon + 1))
+                forecasts = model.predict(fh=fh)
+                if hasattr(forecasts, 'values'):
+                    forecasts = forecasts.values
+        else:
+            # Traditional ML models (RandomForest, LinearRegression, LightGBM)
+            X_future = scaler.transform(future_features)
+            forecasts = model.predict(X_future)
         
         # Create uncertainty bounds (simple approach)
         if isinstance(forecasts, np.ndarray):
@@ -874,7 +916,7 @@ elif page == "Model Training":
         # Model selection
         models_to_train = st.multiselect(
             "Select models to train",
-            ["RandomForest", "LinearRegression", "Prophet", "Exponential Smoothing", "AutoETS", "LightGBM"],
+            ["RandomForest", "LinearRegression", "Prophet", "TBATS", "ExponentialSmoothing", "AutoETS", "LightGBM"],
             default=["RandomForest", "LinearRegression", "Prophet", "LightGBM"]
         )
         
@@ -1298,4 +1340,3 @@ st.markdown("AI Agent-Based Load Forecasting System")
 if __name__ == "__main__":
     # This will be executed when the script is run directly
     pass
-
