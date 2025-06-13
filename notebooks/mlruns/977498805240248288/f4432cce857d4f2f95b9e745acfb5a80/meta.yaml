@@ -1,0 +1,14 @@
+artifact_uri: file:///Users/gonzalf1/git/AILoadPredictor2/notebooks/mlruns/977498805240248288/f4432cce857d4f2f95b9e745acfb5a80/artifacts
+end_time: 1749794839528
+entry_point_name: ''
+experiment_id: '977498805240248288'
+lifecycle_stage: active
+run_id: f4432cce857d4f2f95b9e745acfb5a80
+run_name: RandomForest
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1749794839525
+status: 4
+tags: []
+user_id: gonzalf1

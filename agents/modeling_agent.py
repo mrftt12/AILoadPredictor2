@@ -91,7 +91,7 @@ class ModelingAgent:
         
         # Prepare data for modeling
         X_train, X_test, y_train, y_test, feature_names, scaler = self._prepare_data(
-            data, target_col, timestamp_col, config["train_size"]
+            data, target_col, timestamp_col, config.get("train_size", 0.8)
         )
         
         # Create a dictionary to store trained models
@@ -105,7 +105,7 @@ class ModelingAgent:
                 # Log training configuration
                 mlflow.log_params({
                     "model_name": model_name,
-                    "train_size": config["train_size"],
+                    "train_size": config.get("train_size", 0.8),
                     "features": ", ".join(feature_names),
                     "target": target_col
                 })
@@ -213,17 +213,18 @@ class ModelingAgent:
             Tuple of (trained model, metrics dictionary)
         """
         # Define hyperparameters for tuning
-        if config["tuning_method"] == "grid_search":
+        tuning_method = config.get("tuning_method", "none")
+        if tuning_method == "grid_search":
             # Grid search for hyperparameters
             param_grid = self.hyperparameter_grids["RandomForest"]
             
             # Create grid search object
             grid_search = GridSearchCV(
-                estimator=RandomForestRegressor(random_state=config["random_state"]),
+                estimator=RandomForestRegressor(random_state=config.get("random_state", 42)),
                 param_grid=param_grid,
-                cv=config["cv_folds"],
+                cv=config.get("cv_folds", 3),
                 scoring='neg_mean_squared_error',
-                n_jobs=config["n_jobs"]
+                n_jobs=config.get("n_jobs", -1)
             )
             
             # Fit grid search
@@ -238,10 +239,10 @@ class ModelingAgent:
                 max_depth=best_params.get("max_depth", None),
                 min_samples_split=best_params.get("min_samples_split", 2),
                 min_samples_leaf=best_params.get("min_samples_leaf", 1),
-                random_state=config["random_state"]
+                random_state=config.get("random_state", 42)
             )
             
-        elif config["tuning_method"] == "random_search":
+        elif tuning_method == "random_search":
             # Random search for hyperparameters
             import random
             hp_grid = self.hyperparameter_grids["RandomForest"]
@@ -260,7 +261,7 @@ class ModelingAgent:
                 max_depth=rand_params["max_depth"],
                 min_samples_split=rand_params["min_samples_split"],
                 min_samples_leaf=rand_params["min_samples_leaf"],
-                random_state=config["random_state"]
+                random_state=config.get("random_state", 42)
             )
             
             # Set best_params for logging
@@ -281,7 +282,7 @@ class ModelingAgent:
                 max_depth=best_params["max_depth"],
                 min_samples_split=best_params["min_samples_split"],
                 min_samples_leaf=best_params["min_samples_leaf"],
-                random_state=config["random_state"]
+                random_state=config.get("random_state", 42)
             )
         
         # Log hyperparameters
@@ -331,7 +332,8 @@ class ModelingAgent:
         train_data = lgb.Dataset(X_train, label=y_train, feature_name=feature_names)
         
         # Define hyperparameters
-        if config["tuning_method"] == "grid_search":
+        tuning_method = config.get("tuning_method", "none")
+        if tuning_method == "grid_search":
             # Grid search for hyperparameters
             param_grid = self.hyperparameter_grids["LightGBM"]
             
@@ -376,7 +378,7 @@ class ModelingAgent:
             # Use best parameters
             params = best_params
             
-        elif config["tuning_method"] == "random_search":
+        elif tuning_method == "random_search":
             # Random search for hyperparameters
             import random
             hp_grid = self.hyperparameter_grids["LightGBM"]
@@ -457,15 +459,16 @@ class ModelingAgent:
         df_prophet.columns = ['ds', 'y']  # Prophet requires these column names
         
         # Split into train and test sets
-        train_size = int(len(df_prophet) * config["train_size"])
+        train_size = int(len(df_prophet) * config.get("train_size", 0.8))
         df_train = df_prophet.iloc[:train_size]
         df_test = df_prophet.iloc[train_size:]
         
         # Hyperparameter tuning
-        if config["tuning_method"] in ["grid_search", "random_search"]:
+        tuning_method = config.get("tuning_method", "none")
+        if tuning_method in ["grid_search", "random_search"]:
             param_grid = self.hyperparameter_grids["Prophet"]
             
-            if config["tuning_method"] == "grid_search":
+            if tuning_method == "grid_search":
                 # Grid search for hyperparameters
                 best_params = None
                 best_score = float('inf')
@@ -593,15 +596,16 @@ class ModelingAgent:
         series = data[target_col].copy()
         
         # Split into train and test
-        train_size = int(len(series) * config["train_size"])
+        train_size = int(len(series) * config.get("train_size", 0.8))
         train_data = series.iloc[:train_size]
         test_data = series.iloc[train_size:]
         
         # Hyperparameter tuning
-        if config["tuning_method"] in ["grid_search", "random_search"]:
+        tuning_method = config.get("tuning_method", "none")
+        if tuning_method in ["grid_search", "random_search"]:
             param_grid = self.hyperparameter_grids["ARIMA"]
             
-            if config["tuning_method"] == "grid_search":
+            if tuning_method == "grid_search":
                 # Grid search for hyperparameters
                 best_params = None
                 best_score = float('inf')
@@ -697,15 +701,16 @@ class ModelingAgent:
         series = data[target_col].copy()
         
         # Split into train and test
-        train_size = int(len(series) * config["train_size"])
+        train_size = int(len(series) * config.get("train_size", 0.8))
         train_data = series.iloc[:train_size]
         test_data = series.iloc[train_size:]
         
         # Hyperparameter tuning
-        if config["tuning_method"] in ["grid_search", "random_search"]:
+        tuning_method = config.get("tuning_method", "none")
+        if tuning_method in ["grid_search", "random_search"]:
             param_grid = self.hyperparameter_grids["SARIMA"]
             
-            if config["tuning_method"] == "grid_search":
+            if tuning_method == "grid_search":
                 # Grid search for hyperparameters (limited)
                 best_params = None
                 best_score = float('inf')
