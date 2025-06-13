@@ -13,6 +13,17 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_percentage_error, r2_score, mean_squared_error
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
+from prophet import Prophet
+from sktime.forecasting.naive import NaiveForecaster
+from sktime.forecasting.arima import ARIMA
+#from sktime.forecasting.fbprophet import Prophet
+from sktime.forecasting.bats import BATS
+#from sktime.forecasting.tbats import TBATS
+from sktime.forecasting.compose import AutoEnsembleForecaster
+from sktime.forecasting.exp_smoothing import ExponentialSmoothing
+from sktime.forecasting.ets import AutoETS
+import lightgbm as LightGBM
+
 
 # Set page configuration
 st.set_page_config(
@@ -286,6 +297,78 @@ def train_models(data, target_col, timestamp_col, models, config):
                 "scaler": scaler,
                 "feature_cols": feature_cols
             }
+
+        elif model_name == "Prophet":
+            # Train Linear Regression model
+            model = Prophet()
+            model.fit(X_train, y_train)
+            
+            # Make predictions
+            y_pred = model.predict(X_test)
+            
+            # Store model
+            trained_models[model_name] = {
+                "model": model,
+                "scaler": scaler,
+                "feature_cols": feature_cols
+            }
+        elif model_name == "TBATS":
+            # Train Linear Regression model
+            model = TBATS()
+            model.fit(X_train, y_train)
+            
+            # Make predictions
+            y_pred = model.predict(X_test)
+            
+            # Store model
+            trained_models[model_name] = {
+                "model": model,
+                "scaler": scaler,
+                "feature_cols": feature_cols
+            }
+        elif model_name == "ExponentialSmoothing":
+            # Train 
+            model = ExponentialSmoothing()
+            model.fit(X_train, y_train)
+            
+            # Make predictions
+            y_pred = model.predict(X_test)
+            
+            # Store model
+            trained_models[model_name] = {
+                "model": model,
+                "scaler": scaler,
+                "feature_cols": feature_cols
+            }
+        elif model_name == "AutoETS":
+            # Train 
+            model = AutoETS()
+            model.fit(X_train, y_train)
+            
+            # Make predictions
+            y_pred = model.predict(X_test)
+            
+            # Store model
+            trained_models[model_name] = {
+                "model": model,
+                "scaler": scaler,
+                "feature_cols": feature_cols
+            }
+        elif model_name == "LightGBM":
+            # 
+            model = LightGBM()
+            model.fit(X_train, y_train)
+            
+            # Make predictions
+            y_pred = model.predict(X_test)
+            
+            # Store model
+            trained_models[model_name] = {
+                "model": model,
+                "scaler": scaler,
+                "feature_cols": feature_cols
+            }
+
             
         else:
             # Skip unsupported models
@@ -791,8 +874,8 @@ elif page == "Model Training":
         # Model selection
         models_to_train = st.multiselect(
             "Select models to train",
-            ["RandomForest", "LinearRegression"],
-            default=["RandomForest", "LinearRegression"]
+            ["RandomForest", "LinearRegression", "Prophet", "Exponential Smoothing", "AutoETS", "LightGBM"],
+            default=["RandomForest", "LinearRegression", "Prophet", "LightGBM"]
         )
         
         # Split configuration
@@ -1215,3 +1298,4 @@ st.markdown("AI Agent-Based Load Forecasting System")
 if __name__ == "__main__":
     # This will be executed when the script is run directly
     pass
+
