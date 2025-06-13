@@ -85,6 +85,10 @@ class ModelingAgent:
         Returns:
             Dictionary containing trained models and training details
         """
+        # Ensure config is a dictionary and handle safely
+        if not isinstance(config, dict):
+            config = {}
+        
         # Start an MLflow experiment
         experiment_name = f"load_forecasting_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         mlflow.set_experiment(experiment_name)
@@ -163,6 +167,24 @@ class ModelingAgent:
             "y_test": y_test
         }
     
+    def train_models(self, data: pd.DataFrame, target_col: str, timestamp_col: str,
+                     models: List[str], config: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Compatibility method that calls the main train method.
+        This provides the same interface as expected by the validation notebook.
+        
+        Args:
+            data: Processed dataframe
+            target_col: Column name containing the target values
+            timestamp_col: Column name containing timestamps
+            models: List of model names to train
+            config: Configuration dictionary for training
+            
+        Returns:
+            Dictionary containing trained models and training details
+        """
+        return self.train(data, target_col, timestamp_col, models, config)
+    
     def _prepare_data(self, data: pd.DataFrame, target_col: str, timestamp_col: str, 
                     train_size: float) -> Tuple:
         """
@@ -213,6 +235,10 @@ class ModelingAgent:
             Tuple of (trained model, metrics dictionary)
         """
         # Define hyperparameters for tuning
+        # Ensure config is a dictionary and handle safely
+        if not isinstance(config, dict):
+            config = {}
+        
         tuning_method = config.get("tuning_method", "none")
         if tuning_method == "grid_search":
             # Grid search for hyperparameters
@@ -332,6 +358,10 @@ class ModelingAgent:
         train_data = lgb.Dataset(X_train, label=y_train, feature_name=feature_names)
         
         # Define hyperparameters
+        # Ensure config is a dictionary and handle safely
+        if not isinstance(config, dict):
+            config = {}
+        
         tuning_method = config.get("tuning_method", "none")
         if tuning_method == "grid_search":
             # Grid search for hyperparameters
@@ -464,6 +494,10 @@ class ModelingAgent:
         df_test = df_prophet.iloc[train_size:]
         
         # Hyperparameter tuning
+        # Ensure config is a dictionary and handle safely
+        if not isinstance(config, dict):
+            config = {}
+        
         tuning_method = config.get("tuning_method", "none")
         if tuning_method in ["grid_search", "random_search"]:
             param_grid = self.hyperparameter_grids["Prophet"]
@@ -601,6 +635,10 @@ class ModelingAgent:
         test_data = series.iloc[train_size:]
         
         # Hyperparameter tuning
+        # Ensure config is a dictionary and handle safely
+        if not isinstance(config, dict):
+            config = {}
+        
         tuning_method = config.get("tuning_method", "none")
         if tuning_method in ["grid_search", "random_search"]:
             param_grid = self.hyperparameter_grids["ARIMA"]
@@ -706,6 +744,10 @@ class ModelingAgent:
         test_data = series.iloc[train_size:]
         
         # Hyperparameter tuning
+        # Ensure config is a dictionary and handle safely
+        if not isinstance(config, dict):
+            config = {}
+        
         tuning_method = config.get("tuning_method", "none")
         if tuning_method in ["grid_search", "random_search"]:
             param_grid = self.hyperparameter_grids["SARIMA"]
