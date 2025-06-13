@@ -10,4 +10,3 @@ scikit-learn>=1.6.1
 sqlalchemy>=2.0.41
 statsmodels>=0.14.4
 streamlit>=1.45.1
-sktime>=0.24.0

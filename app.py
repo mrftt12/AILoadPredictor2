@@ -14,14 +14,6 @@ from sklearn.metrics import mean_absolute_percentage_error, r2_score, mean_squar
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from prophet import Prophet
-from sktime.forecasting.naive import NaiveForecaster
-from sktime.forecasting.arima import ARIMA
-#from sktime.forecasting.fbprophet import Prophet
-from sktime.forecasting.bats import BATS
-from sktime.forecasting.tbats import TBATS
-from sktime.forecasting.compose import AutoEnsembleForecaster
-from sktime.forecasting.exp_smoothing import ExponentialSmoothing
-from sktime.forecasting.ets import AutoETS
 import lightgbm as lgb
 
 
