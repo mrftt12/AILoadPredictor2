@@ -1,0 +1,13 @@
+lightgbm>=4.6.0
+mlflow>=2.22.0
+numpy>=2.2.6
+pandas>=2.2.3
+plotly>=6.1.0
+prophet>=1.1.6
+psycopg2-binary>=2.9.10
+requests>=2.32.3
+scikit-learn>=1.6.1
+sqlalchemy>=2.0.41
+statsmodels>=0.14.4
+streamlit>=1.45.1
+sktime>=0.24.0
